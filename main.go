@@ -1,14 +1,15 @@
 package main
 
 import (
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"strings"
 
 	"github.com/Omegaice/go-xmodem/ymodem"
+	"github.com/goburrow/serial"
 	"github.com/spf13/cobra"
-	"github.com/tarm/serial"
+	// "github.com/tarm/serial"
 )
 
 var Port, Message, Wait string
@@ -16,13 +17,13 @@ var Port, Message, Wait string
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	var cmdSend = &cobra.Command{
+	cmdSend := &cobra.Command{
 		Use:   "send [port]",
 		Short: "Send file",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
 			// Open connection
-			connection, err := serial.OpenPort(&serial.Config{Name: Port, Baud: 115200})
+			connection, err := serial.Open(&serial.Config{Address: Port, BaudRate: 115200})
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -59,7 +60,7 @@ func main() {
 				log.Fatalln(err)
 			}
 
-			data, err := ioutil.ReadAll(fIn)
+			data, err := io.ReadAll(fIn)
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -78,13 +79,13 @@ func main() {
 	cmdSend.Flags().StringVarP(&Message, "message", "m", "", "message to initiate data transfer")
 	cmdSend.Flags().StringVarP(&Wait, "wait", "w", "", "message to wait before initiating data transfer")
 
-	var cmdReceive = &cobra.Command{
+	cmdReceive := &cobra.Command{
 		Use:   "receive [port]",
 		Short: "Receive file",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
 			// Open connection
-			connection, err := serial.OpenPort(&serial.Config{Name: Port, Baud: 115200})
+			connection, err := serial.Open(&serial.Config{Address: Port, BaudRate: 115200})
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -136,7 +137,7 @@ func main() {
 	cmdReceive.Flags().StringVarP(&Message, "message", "m", "", "message to initiate data transfer")
 	cmdReceive.Flags().StringVarP(&Wait, "wait", "w", "", "message to wait before initiating data transfer")
 
-	var Root = &cobra.Command{
+	Root := &cobra.Command{
 		Use:   "go-xmodem",
 		Short: "",
 		Long:  ``,
