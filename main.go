@@ -9,7 +9,6 @@ import (
 	"github.com/Omegaice/go-xmodem/ymodem"
 	"github.com/goburrow/serial"
 	"github.com/spf13/cobra"
-	// "github.com/tarm/serial"
 )
 
 var Port, Message, Wait string

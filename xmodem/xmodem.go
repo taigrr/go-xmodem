@@ -3,18 +3,23 @@ package xmodem
 import (
 	"bytes"
 	"io"
-	"log"
+
+	"github.com/taigrr/log-socket/log"
 )
 
-const SOH byte = 0x01
-const STX byte = 0x02
-const EOT byte = 0x04
-const ACK byte = 0x06
-const NAK byte = 0x15
-const POLL byte = 0x43
+const (
+	SOH  byte = 0x01
+	STX  byte = 0x02
+	EOT  byte = 0x04
+	ACK  byte = 0x06
+	NAK  byte = 0x15
+	POLL byte = 0x43
+)
 
-const SHORT_PACKET_PAYLOAD_LEN = 128
-const LONG_PACKET_PAYLOAD_LEN = 1024
+const (
+	SHORT_PACKET_PAYLOAD_LEN = 128
+	LONG_PACKET_PAYLOAD_LEN  = 1024
+)
 
 func CRC16(data []byte) uint16 {
 	var u16CRC uint16 = 0
@@ -81,7 +86,7 @@ func sendBlock(c io.ReadWriter, block int, data []byte, packetPayloadLen int) er
 		return err
 	}
 
-	//send data
+	// send data
 	var toSend bytes.Buffer
 	toSend.Write(data)
 	for toSend.Len() < packetPayloadLen {
@@ -97,10 +102,10 @@ func sendBlock(c io.ReadWriter, block int, data []byte, packetPayloadLen int) er
 		}
 	}
 
-	//calc CRC
+	// calc CRC
 	u16CRC := CRC16Constant(data, packetPayloadLen)
 
-	//send CRC
+	// send CRC
 	if _, err := c.Write([]byte{uint8(u16CRC >> 8)}); err != nil {
 		return err
 	}
@@ -126,6 +131,7 @@ func modemSend(c io.ReadWriter, data []byte, packetPayloadLen int) error {
 		return err
 	}
 
+	// Start Connection
 	if oBuffer[0] == POLL {
 		var blocks int = len(data) / packetPayloadLen
 		if len(data) > blocks*packetPayloadLen {
@@ -133,7 +139,7 @@ func modemSend(c io.ReadWriter, data []byte, packetPayloadLen int) error {
 		}
 
 		failed := 0
-		var currentBlock = 0
+		currentBlock := 0
 		for currentBlock < blocks && failed < 10 {
 			if int(int(currentBlock+1)*int(packetPayloadLen)) > len(data) {
 				sendBlock(c, currentBlock+1, data[currentBlock*packetPayloadLen:], packetPayloadLen)
@@ -147,8 +153,10 @@ func modemSend(c io.ReadWriter, data []byte, packetPayloadLen int) error {
 
 			if oBuffer[0] == ACK {
 				currentBlock++
+				log.Debugf("Block %d sent\n", currentBlock)
 			} else {
 				failed++
+				log.Debugf("Block %d failed. # of fails %d\n", currentBlock, failed)
 			}
 		}
 
