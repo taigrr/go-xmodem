@@ -59,7 +59,7 @@ func CRC16Constant(data []byte, length int) uint16 {
 	}
 
 	for c := 0; c < length-len(data); c++ {
-		u16CRC = u16CRC ^ (uint16(NUL) << 8)
+		u16CRC = u16CRC ^ (uint16(SUB) << 8)
 		for i := 0; i < 8; i++ {
 			if u16CRC&0x8000 > 0 {
 				u16CRC = u16CRC<<1 ^ 0x1021
@@ -92,7 +92,7 @@ func sendBlock(c io.ReadWriter, block uint8, data []byte, packetPayloadLen int) 
 	var toSend bytes.Buffer
 	toSend.Write(data)
 	for toSend.Len() < packetPayloadLen {
-		toSend.Write([]byte{NUL})
+		toSend.Write([]byte{SUB})
 	}
 
 	paddedData := toSend.Bytes()
