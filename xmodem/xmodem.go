@@ -8,17 +8,19 @@ import (
 )
 
 const (
+	NUL  byte = 0x00
 	SOH  byte = 0x01
 	STX  byte = 0x02
 	EOT  byte = 0x04
+	SUB  byte = 0x1A
 	ACK  byte = 0x06
 	NAK  byte = 0x15
 	POLL byte = 0x43
 )
 
 const (
-	SHORT_PACKET_PAYLOAD_LEN = 128
-	LONG_PACKET_PAYLOAD_LEN  = 1024
+	XModemBlockLength   = 128
+	XModem1KBlockLength = 1024
 )
 
 func CRC16(data []byte) uint16 {
@@ -57,7 +59,7 @@ func CRC16Constant(data []byte, length int) uint16 {
 	}
 
 	for c := 0; c < length-len(data); c++ {
-		u16CRC = u16CRC ^ (0x04 << 8)
+		u16CRC = u16CRC ^ (uint16(NUL) << 8)
 		for i := 0; i < 8; i++ {
 			if u16CRC&0x8000 > 0 {
 				u16CRC = u16CRC<<1 ^ 0x1021
@@ -70,19 +72,19 @@ func CRC16Constant(data []byte, length int) uint16 {
 	return u16CRC
 }
 
-func sendBlock(c io.ReadWriter, block int, data []byte, packetPayloadLen int) error {
+func sendBlock(c io.ReadWriter, block uint8, data []byte, packetPayloadLen int) error {
 	startByte := SOH
-	if packetPayloadLen == LONG_PACKET_PAYLOAD_LEN {
+	if packetPayloadLen == XModem1KBlockLength {
 		startByte = STX
 	}
 	// send start byte
 	if _, err := c.Write([]byte{startByte}); err != nil {
 		return err
 	}
-	if _, err := c.Write([]byte{uint8(block % 256)}); err != nil {
+	if _, err := c.Write([]byte{block}); err != nil {
 		return err
 	}
-	if _, err := c.Write([]byte{uint8(255 - (block % 256))}); err != nil {
+	if _, err := c.Write([]byte{^block}); err != nil {
 		return err
 	}
 
@@ -90,16 +92,12 @@ func sendBlock(c io.ReadWriter, block int, data []byte, packetPayloadLen int) er
 	var toSend bytes.Buffer
 	toSend.Write(data)
 	for toSend.Len() < packetPayloadLen {
-		toSend.Write([]byte{EOT})
+		toSend.Write([]byte{NUL})
 	}
 
-	sent := 0
-	for sent < toSend.Len() {
-		if n, err := c.Write(toSend.Bytes()[sent:]); err != nil {
-			return err
-		} else {
-			sent += n
-		}
+	paddedData := toSend.Bytes()
+	if _, err := c.Write(paddedData); err != nil {
+		return err
 	}
 
 	// calc CRC
@@ -109,7 +107,7 @@ func sendBlock(c io.ReadWriter, block int, data []byte, packetPayloadLen int) er
 	if _, err := c.Write([]byte{uint8(u16CRC >> 8)}); err != nil {
 		return err
 	}
-	if _, err := c.Write([]byte{uint8(u16CRC & 0x0FF)}); err != nil {
+	if _, err := c.Write([]byte{uint8(u16CRC & 0xFF)}); err != nil {
 		return err
 	}
 
@@ -117,11 +115,11 @@ func sendBlock(c io.ReadWriter, block int, data []byte, packetPayloadLen int) er
 }
 
 func ModemSend(c io.ReadWriter, data []byte) error {
-	return modemSend(c, data, SHORT_PACKET_PAYLOAD_LEN)
+	return modemSend(c, data, XModemBlockLength)
 }
 
 func ModemSend1K(c io.ReadWriter, data []byte) error {
-	return modemSend(c, data, LONG_PACKET_PAYLOAD_LEN)
+	return modemSend(c, data, XModem1KBlockLength)
 }
 
 func modemSend(c io.ReadWriter, data []byte, packetPayloadLen int) error {
@@ -133,7 +131,7 @@ func modemSend(c io.ReadWriter, data []byte, packetPayloadLen int) error {
 
 	// Start Connection
 	if oBuffer[0] == POLL {
-		var blocks int = len(data) / packetPayloadLen
+		blocks := len(data) / packetPayloadLen
 		if len(data) > blocks*packetPayloadLen {
 			blocks++
 		}
@@ -142,9 +140,15 @@ func modemSend(c io.ReadWriter, data []byte, packetPayloadLen int) error {
 		currentBlock := 0
 		for currentBlock < blocks && failed < 10 {
 			if int(int(currentBlock+1)*int(packetPayloadLen)) > len(data) {
-				sendBlock(c, currentBlock+1, data[currentBlock*packetPayloadLen:], packetPayloadLen)
+				err := sendBlock(c, uint8((currentBlock+1)%256), data[currentBlock*packetPayloadLen:], packetPayloadLen)
+				if err != nil {
+					return err
+				}
 			} else {
-				sendBlock(c, currentBlock+1, data[currentBlock*packetPayloadLen:(currentBlock+1)*packetPayloadLen], packetPayloadLen)
+				err := sendBlock(c, uint8((currentBlock+1)%256), data[currentBlock*packetPayloadLen:(currentBlock+1)*packetPayloadLen], packetPayloadLen)
+				if err != nil {
+					return err
+				}
 			}
 
 			if _, err := c.Read(oBuffer); err != nil {
@@ -153,13 +157,17 @@ func modemSend(c io.ReadWriter, data []byte, packetPayloadLen int) error {
 
 			if oBuffer[0] == ACK {
 				currentBlock++
-				log.Debugf("Block %d sent\n", currentBlock)
+				if currentBlock%100 == 0 {
+					log.Debugf("Block %d/%d sent\n", currentBlock, blocks)
+				}
 			} else {
 				failed++
 				log.Debugf("Block %d failed. # of fails %d\n", currentBlock, failed)
 			}
 		}
-
+		log.Debugf("Block %d/%d sent\n", currentBlock, blocks)
+		log.Debugf("Failed %d times\n", failed)
+		log.Debugf("Sending EOT...\n")
 		if _, err := c.Write([]byte{EOT}); err != nil {
 			return err
 		}
@@ -171,7 +179,7 @@ func modemSend(c io.ReadWriter, data []byte, packetPayloadLen int) error {
 func ModemReceive(c io.ReadWriter) ([]byte, error) {
 	var data bytes.Buffer
 	oBuffer := make([]byte, 1)
-	dBuffer := make([]byte, LONG_PACKET_PAYLOAD_LEN)
+	dBuffer := make([]byte, XModemBlockLength)
 
 	log.Println("Before")
 
@@ -200,11 +208,12 @@ func ModemReceive(c io.ReadWriter) ([]byte, error) {
 		var packetSize int
 		switch pType {
 		case SOH:
-			packetSize = SHORT_PACKET_PAYLOAD_LEN
-			break
+			log.Println("SOH: Use 128")
+			packetSize = XModemBlockLength
 		case STX:
-			packetSize = LONG_PACKET_PAYLOAD_LEN
-			break
+			log.Println("STX: Use 1K")
+			dBuffer = make([]byte, XModem1KBlockLength)
+			packetSize = XModem1KBlockLength
 		}
 
 		if _, err := c.Read(oBuffer); err != nil {
